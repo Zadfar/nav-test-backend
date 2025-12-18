@@ -1,0 +1,54 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Dependencies (Check for errors)
+        run: npm install
+
+      # Copy files to EC2
+      - name: Deploy to Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "."
+          target: "/home/ubuntu/backend-temp"
+
+      # Move files and restart PM2
+      - name: Restart Backend
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "Deploying Backend..."
+            
+            # 1. Clean destination and move files
+            # Note: We keep node_modules if possible to speed up, or reinstall
+            sudo rm -rf /var/www/backend/payment-backend
+            sudo mkdir -p /var/www/backend/payment-backend
+            sudo cp -r /home/ubuntu/backend-temp/* /var/www/backend/payment-backend/
+            
+            # 2. Install Production Deps
+            cd /var/www/backend/payment-backend
+            sudo npm install --production
+            
+            # 3. Restart PM2
+            pm2 restart payment-api || pm2 start server.js --name payment-api
+            pm2 save
+            
+            # 4. Cleanup
+            rm -rf /home/ubuntu/backend-temp
+            echo "Backend Deployed Successfully!"
